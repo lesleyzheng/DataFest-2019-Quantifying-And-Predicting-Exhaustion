@@ -1,0 +1,40 @@
+---
+title: "DataFest 2019"
+author: "Fengling Hu"
+date: "3/29/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(mosaic)
+library(rstan)
+
+games <- read_csv("games.csv")
+gps <- read_csv("gps.csv")
+rpe <- read_csv("rpe.csv")
+wellness <- read_csv("wellness.csv")
+
+stan_model <- "
+data {
+  int<lower=0> J;         // number of schools 
+  real y[J];              // estimated treatment effects
+  real<lower=0> sigma[J]; // standard error of effect estimates 
+}
+parameters {
+  real mu;                // population treatment effect
+  real<lower=0> tau;      // standard deviation in treatment effects
+  vector[J] eta;          // unscaled deviation from mu by school
+}
+transformed parameters {
+  vector[J] theta = mu + tau * eta;        // school treatment effects
+}
+model {
+  target += normal_lpdf(eta | 0, 1);       // prior log-density
+  target += normal_lpdf(y | theta, sigma); // log-likelihood
+}
+"
+
+
+```
+
