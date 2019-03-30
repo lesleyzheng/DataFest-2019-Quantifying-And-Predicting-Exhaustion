@@ -8,33 +8,58 @@ output: html_document
 ```{r}
 library(tidyverse)
 library(mosaic)
-library(rstan)
 
 games <- read_csv("games.csv")
 gps <- read_csv("gps.csv")
 rpe <- read_csv("rpe.csv")
 wellness <- read_csv("wellness.csv")
+```
 
-stan_model <- "
-data {
-  int<lower=0> J;         // number of schools 
-  real y[J];              // estimated treatment effects
-  real<lower=0> sigma[J]; // standard error of effect estimates 
-}
-parameters {
-  real mu;                // population treatment effect
-  real<lower=0> tau;      // standard deviation in treatment effects
-  vector[J] eta;          // unscaled deviation from mu by school
-}
-transformed parameters {
-  vector[J] theta = mu + tau * eta;        // school treatment effects
-}
-model {
-  target += normal_lpdf(eta | 0, 1);       // prior log-density
-  target += normal_lpdf(y | theta, sigma); // log-likelihood
-}
-"
+```{r}
+#changing to factors
+summary(wellness)
+wellness$Pain <- wellness$Pain %>% as.factor() %>% as.numeric()
+wellness$Illness <- wellness$Illness %>% as.factor() %>% as.numeric()
+wellness$Menstruation <- wellness$Menstruation %>% as.factor() %>% as.numeric()
+wellness$TrainingReadiness = substr(wellness$TrainingReadiness, 1, nchar(wellness$TrainingReadiness) - 1)  %>% as.numeric()
+summary(wellness)
+```
 
+```{r}
+#standardize
+zstd <- function(data, column){
+    varName <- names(data)[column]
+    meanAndSd <- data %>% 
+        group_by(PlayerID) %>% 
+        summarize(means = mean(!!sym(varName)), 
+                  sds = sd(!!sym(varName))
+        )
+    withMeanSd <- data %>% 
+        left_join(meanAndSd, by = "PlayerID")
+    stdData <- withMeanSd %>% 
+        mutate(temp = (!!sym(varName) - means)/sds + 4)
+    data[, varName] <- stdData[, "temp"]
+    
+    data
+}
 
+data <- wellness
+for(i in c(3:6, 10, 11, 19)){
+    data <- zstd(data, i)
+}
+wellness <- data %>% mutate(MonitoringScore = MonitoringScore - 4)
+```
+
+```{r}
+complete <- wellness[, c(3, 4, 5, 6, 9, 10, 12:14, 19)] %>% complete.cases()
+exComplete <- wellness[complete, ]
+pcaEx <- princomp(exComplete[,  c(3, 4, 5, 6, 9, 10, 12, 13, 14, 19)], cor = TRUE, scores = TRUE)
+summary(pcaEx)
+pcaScores <- pcaEx$scores
+exScore <- pcaScores[, 1] + pcaScores[, 2]
+pcaLoadings <- pcaEx$loadings; pcaLoadings
+exLoading <- pcaLoadings[, 1] + pcaLoadings[, 2]
+
+ggplot(exComplete %>% cbind(exScore), aes(MonitoringScore, exScore)) + geom_point()
 ```
 
