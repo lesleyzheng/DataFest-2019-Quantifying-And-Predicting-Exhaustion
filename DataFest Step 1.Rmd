@@ -8,10 +8,9 @@ output: html_document
 ```{r}
 library(tidyverse)
 library(mosaic)
+library(pcaMethods)
 
-games <- read_csv("games.csv")
-gps <- read_csv("gps.csv")
-rpe <- read_csv("rpe.csv")
+rpeOrig <- read_csv("rpe.csv")
 wellness <- read_csv("wellness.csv")
 ```
 
@@ -22,7 +21,25 @@ wellness$Pain <- wellness$Pain %>% as.factor() %>% as.numeric()
 wellness$Illness <- wellness$Illness %>% as.factor() %>% as.numeric()
 wellness$Menstruation <- wellness$Menstruation %>% as.factor() %>% as.numeric()
 wellness$TrainingReadiness = substr(wellness$TrainingReadiness, 1, nchar(wellness$TrainingReadiness) - 1)  %>% as.numeric()
+wellness$Nutrition <- wellness$Nutrition %>% as.factor() %>% as.numeric()
+wellness$NutritionAdjustment <- wellness$NutritionAdjustment
+wellness <- wellness %>% mutate(NutritionAdjustment = 
+                                    ifelse(NutritionAdjustment == "Yes", 3,
+                                           ifelse(NutritionAdjustment == "I Don't Know", 2,
+                                                  ifelse(NutritionAdjustment == "No", 1, NA)
+                                           )
+                                    )
+)
+wellness <- wellness %>% select(-BedTime, -WakeTime, -USGMeasurement, -USG)
 summary(wellness)
+```
+
+```{r}
+#imputing missing data
+pc <- pca(wellness[, 3:15], method="bpca", nPcs=7, maxSteps = 200)
+loadings(pc)
+cObs <- completeObs(pc) %>% as.data.frame()
+wellness <- wellness[, 1:2] %>% cbind(cObs)
 ```
 
 ```{r}
@@ -31,35 +48,88 @@ zstd <- function(data, column){
     varName <- names(data)[column]
     meanAndSd <- data %>% 
         group_by(PlayerID) %>% 
-        summarize(means = mean(!!sym(varName)), 
-                  sds = sd(!!sym(varName))
+        summarize(means = mean(!!sym(varName), na.rm = TRUE), 
+                  sds = sd(!!sym(varName), na.rm = TRUE)
         )
     withMeanSd <- data %>% 
         left_join(meanAndSd, by = "PlayerID")
     stdData <- withMeanSd %>% 
-        mutate(temp = (!!sym(varName) - means)/sds + 4)
+        mutate(temp = (!!sym(varName) - means)/sds)
     data[, varName] <- stdData[, "temp"]
     
     data
 }
 
 data <- wellness
-for(i in c(3:6, 10, 11, 19)){
+for(i in c(3:6, 8, 9, 15)){
     data <- zstd(data, i)
 }
-wellness <- data %>% mutate(MonitoringScore = MonitoringScore - 4)
+wellness2 <- data
 ```
 
 ```{r}
-complete <- wellness[, c(3, 4, 5, 6, 9, 10, 12:14, 19)] %>% complete.cases()
-exComplete <- wellness[complete, ]
-pcaEx <- princomp(exComplete[,  c(3, 4, 5, 6, 9, 10, 12, 13, 14, 19)], cor = TRUE, scores = TRUE)
+#create PCA score
+pcaEx <- princomp(wellness2[, c(3:6, 8)], cor = TRUE, scores = TRUE)
 summary(pcaEx)
-pcaScores <- pcaEx$scores
-exScore <- pcaScores[, 1] + pcaScores[, 2]
-pcaLoadings <- pcaEx$loadings; pcaLoadings
-exLoading <- pcaLoadings[, 1] + pcaLoadings[, 2]
+pcaEx$loadings
+wellness_final <- wellness2 %>% cbind(Exhaustion = pcaEx$scores[, 1])
 
-ggplot(exComplete %>% cbind(exScore), aes(MonitoringScore, exScore)) + geom_point()
+ggplot(wellness_final, aes(MonitoringScore, Exhaustion)) + 
+    geom_point()
+
+wellness_final$Date <- as.Date(wellness_final$Date)
+wellness_final <- wellness_final %>% mutate(DateTrained = Date - 1)
+```
+
+```{r}
+#create final rpe file
+rpe <- rpeOrig %>% select(-Training, -SessionType)
+rpeOF <- rpe %>% mutate(BestOf = 
+                                ifelse(BestOutOfMyself == "Absolutely", 3,
+                                          ifelse(BestOutOfMyself == "Somewhat", 2,
+                                                 ifelse(BestOutOfMyself == "Not at all", 1, NA)
+                                          )
+                                ))
+
+data <- rpeOF
+for(i in c(4, 10, 11)){
+    data <- zstd(data, i)
+}
+rpeOF2 <- data
+
+rpeOF2 <- rpeOF2 %>% mutate(SessionLoad = Duration * RPE)
+rpe_final <- rpeOF2 %>% 
+    group_by(Date, PlayerID) %>% 
+    summarize(Sessions = n(),
+              DailyLoad = sum(SessionLoad),
+              AcuteLoad = first(AcuteLoad),
+              ChronicLoad = first(ChronicLoad),
+              AcuteChronicRatio = first(AcuteChronicRatio),
+              ObjectiveRating = first(ObjectiveRating), 
+              FocusRating = first(FocusRating), 
+              BestOutOfMyself = first(BestOf))
+
+rpe_final <- rpe_final %>% rename(DateTrained = Date)
+```
+
+```{r}
+#imputing missing data
+pc2 <- pca(rpe_final[, 3:10], method="bpca", nPcs=6, maxSteps = 100)
+loadings(pc2)
+cObs2 <- completeObs(pc2) %>% as.data.frame()
+rpe_final <- rpe_final %>% select(DateTrained, PlayerID) %>% as.matrix %>% cbind(cObs2 %>% as.matrix) %>% as.data.frame()
+```
+
+
+```{r}
+wellness_final$DateTrained <- as.Date(wellness_final$DateTrained)
+wellness_final$PlayerID <- as.factor(wellness_final$PlayerID)
+rpe_final$DateTrained <- as.Date(rpe_final$DateTrained)
+rpe_final$PlayerID <- as.factor(rpe_final$PlayerID)
+
+rpewellness <- left_join(wellness_final, rpe_final)
+rpewellness <- rpewellness[complete.cases(rpewellness), ]
+
+#rm(wellness, wellness2, pcaEx, pc, cObs, zstd, varName, meanAndSd, withMeanSd, stdData, data, rpeOF, rpeOF2, pc2, cObs2, i, rpe)
 ```
 
