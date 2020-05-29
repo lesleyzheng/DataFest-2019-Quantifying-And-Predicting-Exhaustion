@@ -41,4 +41,8 @@ This finding is interesting because weather was an unrecorded factor. We suggest
 
 Models: linear regression, decision tree, random forest, and k-nearest neighbor
 
+## Credits
+
+Fengling Hu, Lesley Zheng, Laboni Hoque, Clara Seo, Esther Song
+
 
